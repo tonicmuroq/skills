@@ -14,7 +14,18 @@ Read the current repository and produce an evidence-based architecture report wi
 4. ASCII flow diagram for request flow and data flow (conditional)
 5. Minimal usable example (conditional)
 
-Match the user's language and keep claims grounded in repository files.
+Match the selected output language and keep claims grounded in repository files.
+
+## Invocation Parameters
+
+This skill uses text parameters in the invocation string. No separate typed argument system is required.
+
+- `/repo-explainer` or `$repo-explainer`: output in English by default.
+- `/repo-explainer chinese` or `$repo-explainer chinese`: output in Chinese.
+- Also accept aliases:
+  - Chinese: `chinese`, `zh`, `zh-cn`, `中文`
+  - English: `english`, `en`, `英文`
+- If the user explicitly asks for a language in the request body, that explicit request overrides invocation defaults.
 
 ## Workflow
 
