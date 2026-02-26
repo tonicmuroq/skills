@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Explainer"
+  short_description: "Analyze repos and explain architecture clearly"
+  default_prompt: "Use $repo-explainer to analyze this repository and produce a concise architecture report."
