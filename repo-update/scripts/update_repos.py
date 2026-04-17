@@ -27,7 +27,7 @@ class GitCommandError(RuntimeError):
         message = stderr.strip() or f"`{command}` exited with code {returncode}"
         super().__init__(message)
         self.repo = repo
-        self.args = args
+        self.command_args = args
         self.returncode = returncode
         self.stderr = stderr
 
@@ -60,21 +60,33 @@ def is_repo_dir(path: Path) -> bool:
     return (path / ".git").is_dir() or (path / ".git").is_file()
 
 
+def repo_root(candidate: Path) -> Path | None:
+    completed = git(candidate, "rev-parse", "--show-toplevel", check=False)
+    if completed.returncode != 0:
+        return None
+    root = completed.stdout.strip()
+    if not root:
+        return None
+    return Path(root).resolve()
+
+
 def discover_repos(root: Path, include_root: bool) -> list[Path]:
     repos: list[Path] = []
     seen: set[Path] = set()
 
     if include_root and is_repo_dir(root):
-        repos.append(root)
-        seen.add(root.resolve())
+        resolved_root = repo_root(root)
+        if resolved_root == root.resolve():
+            repos.append(root)
+            seen.add(resolved_root)
 
     for current_dir, dirnames, filenames in os.walk(root):
         current = Path(current_dir)
 
         has_git = ".git" in dirnames or ".git" in filenames
         if has_git and current != root:
-            resolved = current.resolve()
-            if resolved not in seen:
+            resolved = repo_root(current)
+            if resolved == current.resolve() and resolved not in seen:
                 repos.append(current)
                 seen.add(resolved)
 
@@ -127,10 +139,40 @@ def current_upstream(repo: Path) -> str | None:
     return upstream or None
 
 
+def remotes(repo: Path) -> list[str]:
+    completed = git(repo, "remote", check=False)
+    if completed.returncode != 0:
+        return []
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
 def branch_remote(repo: Path, branch: str) -> str | None:
     completed = git(repo, "config", "--get", f"branch.{branch}.remote", check=False)
     remote = completed.stdout.strip()
     return remote or None
+
+
+def remote_branch_exists(repo: Path, remote: str, branch: str) -> bool:
+    completed = git(
+        repo,
+        "show-ref",
+        "--verify",
+        "--quiet",
+        f"refs/remotes/{remote}/{branch}",
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def infer_upstream(repo: Path, branch: str) -> str | None:
+    matches = [
+        f"{remote}/{branch}"
+        for remote in remotes(repo)
+        if remote_branch_exists(repo, remote, branch)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def has_tracked_changes(repo: Path) -> bool:
@@ -179,6 +221,11 @@ def stash_pop(repo: Path) -> subprocess.CompletedProcess[str]:
     return git(repo, "stash", "pop", "--index", check=False)
 
 
+def fetch_remotes(repo: Path, remote_names: list[str]) -> None:
+    for remote in remote_names:
+        git(repo, "fetch", "--prune", remote)
+
+
 def update_repo(root: Path, repo: Path) -> RepoResult:
     result = RepoResult(repo=repo, action="skipped")
 
@@ -197,25 +244,33 @@ def update_repo(root: Path, repo: Path) -> RepoResult:
         return result
     result.branch = branch
 
+    remote_names = remotes(repo)
+    if not remote_names:
+        result.action = "failed"
+        result.success = False
+        result.details.append("no remotes configured")
+        return result
+
+    fetch_remotes(repo, remote_names)
+
     upstream = current_upstream(repo)
     if not upstream:
-        result.action = "blocked"
-        result.success = False
-        result.details.append("no upstream configured for current branch")
-        return result
+        upstream = infer_upstream(repo, branch)
+        if upstream:
+            result.details.append(f"using inferred upstream {upstream}")
+        else:
+            result.action = "blocked"
+            result.success = False
+            result.details.append("no upstream configured for current branch")
+            return result
     result.upstream = upstream
 
     remote = branch_remote(repo, branch)
     if not remote or remote == ".":
-        result.action = "failed"
-        result.success = False
-        result.details.append("unable to determine fetchable remote for current branch")
-        return result
-
-    git(repo, "fetch", "--prune", remote)
+        remote = upstream.split("/", 1)[0]
 
     head_oid = rev_parse(repo, "HEAD")
-    upstream_oid = rev_parse(repo, "@{u}")
+    upstream_oid = rev_parse(repo, upstream)
 
     if head_oid == upstream_oid:
         result.action = "up-to-date"
@@ -233,13 +288,13 @@ def update_repo(root: Path, repo: Path) -> RepoResult:
 
     try:
         if is_ancestor(repo, head_oid, upstream_oid):
-            git(repo, "merge", "--ff-only", "@{u}")
+            git(repo, "merge", "--ff-only", upstream)
             result.action = "fast-forwarded"
         else:
             backup_branch = create_backup_branch(repo, branch, head_oid)
             result.backup_branch = backup_branch
             result.details.append(f"saved previous HEAD to {backup_branch}")
-            git(repo, "reset", "--hard", "@{u}")
+            git(repo, "reset", "--hard", upstream)
             result.action = "reset-to-upstream"
     except GitCommandError:
         if result.stash_used:

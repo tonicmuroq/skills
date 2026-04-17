@@ -21,9 +21,11 @@ python3 /path/to/repo-update/scripts/update_repos.py --root .
 
 ## What The Script Does
 
-- Discover nested repos by looking for directories or worktrees that contain `.git`.
-- Skip repos with detached `HEAD`, missing upstream configuration, or an in-progress merge, rebase, cherry-pick, revert, or bisect.
-- Fetch the tracked remote for the current branch.
+- Discover nested repos by looking for directories or worktrees that contain `.git`, then verify each candidate is a real repo root before acting on it.
+- Skip repos with detached `HEAD`, no configured or inferable upstream for the current branch, or an in-progress merge, rebase, cherry-pick, revert, or bisect.
+- Fetch configured remotes before deciding what to update.
+- Use the configured upstream for the current branch when present.
+- Infer a same-name upstream such as `origin/main` or `origin/feature-x` when the branch has no tracking configuration but exactly one matching remote branch exists.
 - Fast-forward when `HEAD` is an ancestor of the upstream tip.
 - Create a `repo-update-backup/...` branch and `git reset --hard` to upstream when local history no longer matches upstream. This is the "follow remote truth" path for rebases, force-pushes, and other rewrites.
 - Stash tracked local changes before merge/reset work, then try to reapply the stash afterward.
@@ -34,6 +36,7 @@ python3 /path/to/repo-update/scripts/update_repos.py --root .
 - `up-to-date`: No branch movement was needed.
 - `fast-forwarded`: Local branch moved cleanly to upstream.
 - `reset-to-upstream`: Local history differed from upstream; a backup branch was created before reset.
+- `using inferred upstream ...`: A detail line showing the script matched the current branch to a same-name remote branch because tracking was unset.
 - `restored stashed tracked changes`: A detail line showing the tracked stash reapplied cleanly.
 - `stash reapply conflicted`: A detail line showing the repo updated, but reapplying the stash conflicted. Resolve it manually; the stash entry is kept when Git cannot apply it cleanly.
 - `blocked` or `failed`: The repo was not updated automatically. Inspect the reported reason.
@@ -45,3 +48,4 @@ python3 /path/to/repo-update/scripts/update_repos.py --root .
 - Preserve local committed history before forced resets by keeping the generated backup branch name in the final report.
 - Call out repos that need manual attention instead of silently ignoring them.
 - Do not clean untracked files unless the user explicitly asks for that behavior.
+- Remember that `git fetch` only updates remote-tracking refs such as `origin/main`; it does not move a local branch like `main` by itself.
