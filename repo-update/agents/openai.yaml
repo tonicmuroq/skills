@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Update"
+  short_description: "Sync nested Git repos with their remotes"
+  default_prompt: "Use $repo-update to update every nested Git repository under the current directory while preserving local tracked changes when possible."
